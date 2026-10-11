@@ -1,0 +1,41 @@
+From e8ff025497e198d23b269447b8c63547b30b07e0 Mon Sep 17 00:00:00 2001
+From: firestarter1996 <firestarter1996@users.noreply.github.com>
+Date: Sun, 11 Oct 2026 07:59:38 -0700
+Subject: [PATCH] fix: show typing in every forum topic, not just one
+
+updatePrintingStrings() created a new per dialog map for every topic
+in the loop and put it into newStrings, so each topic replaced the one
+before it. Only the last topic in the hash walk kept its typing string,
+and every other topic in the same group showed no typing at all.
+
+Build the per dialog maps once, before looping over the topics, so
+every topic keeps its own entry.
+---
+ .../org/telegram/messenger/MessagesController.java     | 10 +++++-----
+ 1 file changed, 5 insertions(+), 5 deletions(-)
+
+diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java b/TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
+index ecd0b08a8a..2007cd8978 100644
+--- a/TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
++++ b/TMessagesProj/src/main/java/org/telegram/messenger/MessagesController.java
+@@ -11460,15 +11460,15 @@ private void updatePrintingStrings() {
+             boolean isEncryptedChat = DialogObject.isEncryptedDialog(key);
+             ConcurrentHashMap<Integer, ArrayList<PrintingUser>> threads = dialogEntry.getValue();
+ 
++            LongSparseArray<CharSequence> newPrintingStrings = new LongSparseArray<>();
++            LongSparseArray<Integer> newPrintingStringsTypes = new LongSparseArray<>();
++            newStrings.put(key, newPrintingStrings);
++            newTypes.put(key, newPrintingStringsTypes);
++
+             for (HashMap.Entry<Integer, ArrayList<PrintingUser>> threadEntry : threads.entrySet()) {
+                 Integer threadId = threadEntry.getKey();
+                 ArrayList<PrintingUser> arr = threadEntry.getValue();
+ 
+-                LongSparseArray<CharSequence> newPrintingStrings = new LongSparseArray<>();
+-                LongSparseArray<Integer> newPrintingStringsTypes = new LongSparseArray<>();
+-                newStrings.put(key, newPrintingStrings);
+-                newTypes.put(key, newPrintingStringsTypes);
+-
+                 if (NekoConfig.ignoreBlocked.Bool()) {
+                     arr = arr.stream().filter(it -> getMessagesController().blockePeers.indexOfKey(it.userId) == -1).collect(Collectors.toCollection(ArrayList::new));
+                 }

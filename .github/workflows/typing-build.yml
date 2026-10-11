@@ -1,0 +1,372 @@
+name: Typing fix build
+
+# Every day: take the newest NextAlone/Nagram release, apply patches/*.patch,
+# build a signed arm64 APK and publish it as a GitHub Release of this fork.
+# If a patch no longer applies, or upstream already contains the fix,
+# the run fails and opens an issue instead of shipping a stale build.
+
+on:
+  schedule:
+    - cron: '17 11 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Build even if this upstream release was already built (y)'
+        required: false
+        default: ''
+      upstream_ref:
+        description: 'Build this upstream tag or branch instead of the newest release'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: typing-build
+  cancel-in-progress: false
+
+env:
+  UPSTREAM: NextAlone/Nagram
+  NDK_VERSION: 27.2.12479018
+  ABI: arm64-v8a
+
+jobs:
+  check:
+    name: Check upstream and patches
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ steps.pick.outputs.ref }}
+      build: ${{ steps.pick.outputs.build }}
+      patchset: ${{ steps.pick.outputs.patchset }}
+    steps:
+      - name: Checkout fork tooling
+        uses: actions/checkout@v7
+        with:
+          path: fork
+      - name: Pick upstream release
+        id: pick
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          REF="${{ github.event.inputs.upstream_ref }}"
+          if [ -z "$REF" ]; then
+            REF=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
+          fi
+          PATCHSET=$(cat fork/patches/*.patch | sha256sum | cut -c1-12)
+          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          echo "patchset=$PATCHSET" >> "$GITHUB_OUTPUT"
+          BUILD=yes
+          if [ "${{ github.event.inputs.force }}" != "y" ]; then
+            if gh release list -R "$GITHUB_REPOSITORY" --limit 100 --json tagName --jq '.[].tagName' | grep -qx "$REF-typing-$PATCHSET"; then
+              BUILD=no
+            fi
+          fi
+          echo "build=$BUILD" >> "$GITHUB_OUTPUT"
+          echo "Upstream $REF, patch set $PATCHSET, build=$BUILD"
+      - name: Checkout upstream
+        if: steps.pick.outputs.build == 'yes'
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ steps.pick.outputs.ref }}
+          path: upstream
+      - name: Check that every patch still applies and is still needed
+        if: steps.pick.outputs.build == 'yes'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ steps.pick.outputs.ref }}
+        run: |
+          set -uo pipefail
+          cd upstream
+          problem=""
+          for p in ../fork/patches/*.patch; do
+            name=$(basename "$p")
+            if git apply --check "$p" 2>/dev/null; then
+              git apply "$p"
+              echo "OK: $name applies on $REF"
+            elif git apply -R --check "$p" 2>/dev/null; then
+              problem="$problem\n* \`$name\`: upstream $REF already contains this change. The fork may no longer be needed; check upstream and delete the patch."
+            else
+              problem="$problem\n* \`$name\`: does not apply on upstream $REF. Rebase it on the new upstream code."
+            fi
+          done
+          if [ -n "$problem" ]; then
+            title="Typing fix build stopped on upstream $REF"
+            body=$(printf "The scheduled build did not ship a new APK.\n%b\n\nRun: %s/%s/actions/runs/%s" "$problem" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
+            existing=$(gh issue list -R "$GITHUB_REPOSITORY" --state open --search "\"$title\" in:title" --json number --jq '.[0].number')
+            if [ -n "$existing" ]; then
+              gh issue comment "$existing" -R "$GITHUB_REPOSITORY" --body "$body"
+            else
+              gh issue create -R "$GITHUB_REPOSITORY" --title "$title" --body "$body"
+            fi
+            printf "%b\n" "$problem"
+            exit 1
+          fi
+
+  ffmpeg:
+    name: Native Build (FFmpeg)
+    needs: check
+    if: needs.check.outputs.build == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.ref }}
+      - name: Fetch Status
+        run: |
+          sed -i 's/\/\///g' settings.gradle
+          git submodule status TMessagesProj/jni/third_party/ffmpeg > ffmpeg_status
+          git submodule status TMessagesProj/jni/third_party/dav1d > dav1d_status
+          git submodule status TMessagesProj/jni/third_party/libvpx > libvpx_status
+      - name: FFmpeg Cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            TMessagesProj/jni/ffmpeg/build
+          key: ${{ hashFiles('ffmpeg_status', 'dav1d_status', 'libvpx_status', 'TMessagesProj/jni/third_party/build_*.sh') }}
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v7
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          python-version: '3.12'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Setup Android SDK Tools
+        uses: android-actions/setup-android@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          packages: 'platform-tools'
+      - name: Install NDK
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "y" | sdkmanager --install "ndk;$NDK_VERSION" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/$NDK_VERSION" >> local.properties
+      - name: Native Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          ./run init action ffmpeg
+          ./run init libs libvpx
+          ./run init libs dav1d
+          ./run init libs ffmpeg
+
+  boringssl:
+    name: Native Build (BoringSSL)
+    needs: check
+    if: needs.check.outputs.build == 'yes'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.ref }}
+      - name: Fetch Status
+        run: |
+          sed -i 's/\/\///g' settings.gradle
+          git submodule status TMessagesProj/jni/boringssl > boringssl_status
+      - name: BoringSSL Cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            TMessagesProj/jni/boringssl/build
+          key: ${{ hashFiles('boringssl_status') }}
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Setup Android SDK Tools
+        uses: android-actions/setup-android@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          packages: 'platform-tools'
+      - name: Install NDK
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "y" | sdkmanager --install "ndk;$NDK_VERSION" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/$NDK_VERSION" >> local.properties
+      - name: Native Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          ./run init action boringssl
+          ./run init libs boringssl
+
+  native:
+    name: Native Build (Telegram)
+    needs: [check, ffmpeg, boringssl]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.ref }}
+      - name: Fetch Status
+        run: |
+          sed -i 's/\/\///g' settings.gradle
+          git submodule status TMessagesProj/jni/third_party/ffmpeg > ffmpeg_status
+          git submodule status TMessagesProj/jni/third_party/dav1d > dav1d_status
+          git submodule status TMessagesProj/jni/third_party/libvpx > libvpx_status
+          git submodule status TMessagesProj/jni/boringssl > boringssl_status
+      - name: Native Cache
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            TMessagesProj/src/main/libs
+          key: ${{ hashFiles('TMessagesProj/jni/**', 'ffmpeg_status', 'boringssl_status') }}-${{ env.ABI }}
+      - name: Checkout Library
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git submodule update --init
+      - name: FFmpeg Cache
+        uses: actions/cache@v6
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            TMessagesProj/jni/ffmpeg/build
+          key: ${{ hashFiles('ffmpeg_status', 'dav1d_status', 'libvpx_status', 'TMessagesProj/jni/third_party/build_*.sh') }}
+      - name: BoringSSL Cache
+        uses: actions/cache@v6
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          path: |
+            TMessagesProj/jni/boringssl/build
+          key: ${{ hashFiles('boringssl_status') }}
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Setup Android SDK Tools
+        uses: android-actions/setup-android@v4
+        if: steps.cache.outputs.cache-hit != 'true'
+        with:
+          packages: 'platform-tools'
+      - name: Install NDK
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          echo "y" | sdkmanager --install "ndk;$NDK_VERSION" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/$NDK_VERSION" >> local.properties
+      - name: Fix BoringSSL
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          cd TMessagesProj/jni
+          ./patch_boringssl.sh
+      - name: Native Build
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          export NATIVE_TARGET="$ABI"
+          ./run libs native
+
+  build:
+    name: Gradle Build and Release
+    needs: [check, native]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout upstream
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.UPSTREAM }}
+          ref: ${{ needs.check.outputs.ref }}
+      - name: Checkout fork tooling
+        uses: actions/checkout@v7
+        with:
+          path: _fork
+      - name: Apply patches
+        run: |
+          set -euo pipefail
+          for p in _fork/patches/*.patch; do
+            git apply "$p"
+            echo "Applied $(basename "$p")"
+          done
+          git diff --stat
+      - name: Set up JDK 17
+        uses: actions/setup-java@v6
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - name: Setup Android SDK Tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Install NDK
+        run: |
+          echo "y" | sdkmanager --install "ndk;$NDK_VERSION" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
+          echo "sdk.dir=${ANDROID_HOME}" > local.properties
+          echo "ndk.dir=${ANDROID_HOME}/ndk/$NDK_VERSION" >> local.properties
+      - name: Checkout Library
+        run: |
+          git submodule update --init 'TMessagesProj/lib/*'
+      - name: Fetch Status
+        run: |
+          sed -i 's/\/\///g' settings.gradle
+          git submodule status TMessagesProj/jni/third_party/ffmpeg > ffmpeg_status
+          git submodule status TMessagesProj/jni/boringssl > boringssl_status
+      - name: Native Cache
+        uses: actions/cache@v6
+        with:
+          path: |
+            TMessagesProj/src/main/libs
+          key: ${{ hashFiles('TMessagesProj/jni/**', 'ffmpeg_status', 'boringssl_status') }}-${{ env.ABI }}
+      - name: Check native libs were restored
+        run: |
+          ls -la TMessagesProj/src/main/libs/$ABI/
+          test -n "$(ls TMessagesProj/src/main/libs/$ABI/*.so 2>/dev/null)"
+      - name: Configure Gradle and signing
+        env:
+          KEYSTORE_B64: ${{ secrets.NAGRAM_KEYSTORE_B64 }}
+        run: |
+          sed -i "s/2000000000000/$(date +%s%N | cut -c1-13)/g" gradle.properties
+          echo "sdk.dir=${ANDROID_HOME}" >> local.properties
+          echo "$KEYSTORE_B64" | base64 -d > TMessagesProj/release.keystore
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v6
+      - name: Release Build
+        env:
+          KEYSTORE_PASS: ${{ secrets.NAGRAM_KEYSTORE_PASS }}
+          ALIAS_NAME: ${{ secrets.NAGRAM_KEY_ALIAS }}
+          ALIAS_PASS: ${{ secrets.NAGRAM_KEYSTORE_PASS }}
+        run: |
+          export NATIVE_TARGET="$ABI"
+          ./gradlew TMessagesProj:assembleRelease --build-cache --no-configuration-cache
+      - name: Check signer and publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REF: ${{ needs.check.outputs.ref }}
+          PATCHSET: ${{ needs.check.outputs.patchset }}
+        run: |
+          set -euo pipefail
+          APK=$(find TMessagesProj/build/outputs/apk -name "*$ABI*.apk" | head -n1)
+          test -n "$APK"
+          BT=$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n1)
+          CERT=$("$BT/apksigner" verify --print-certs "$APK" | grep -m1 'SHA-256 digest' | awk '{print $NF}')
+          echo "Signer SHA-256: $CERT"
+          test "$CERT" = "8d472557bb6d7a18d9dfb86c8928ead22a13d19ec510b1718f1437b9b6c8313a"
+          VER=$("$BT/aapt2" dump badging "$APK" | grep -m1 '^package:')
+          echo "$VER"
+          VNAME=$(echo "$VER" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")
+          TAG="$REF-typing-$PATCHSET"
+          mkdir -p _out
+          OUT="_out/Nagram-typing-v$VNAME-$REF-$ABI.apk"
+          cp "$APK" "$OUT"
+          (cd _out && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
+          LIST=$(cd _fork/patches && ls *.patch | sed 's/^/* /')
+          NOTES=$(printf "Nagram %s (upstream release %s) with the forum topic typing fix.\n\nUpstream release: https://github.com/%s/releases/tag/%s\nPatch set: %s\nSigned with this fork's own key (certificate SHA-256 %s).\n\nPatches:\n%s" "$VNAME" "$REF" "$UPSTREAM" "$REF" "$PATCHSET" "$CERT" "$LIST")
+          gh release create "$TAG" "$OUT" "$OUT.sha256" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Nagram $VNAME ($REF) typing fix" --notes "$NOTES" --latest
