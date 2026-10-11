@@ -31,6 +31,10 @@ env:
   UPSTREAM: NextAlone/Nagram
   NDK_VERSION: 27.2.12479018
   ABI: arm64-v8a
+  # Nagram's native code refuses to start unless the APK signer's SHA-1 matches
+  # the one compiled into TMessagesProj/jni/integrity/integrity.cpp.
+  # This is the SHA-1 of this fork's own signing certificate.
+  SIGNER_SHA1: 03CE7404902241FCA215A62D67D0791E2AEA8E25
 
 jobs:
   check:
@@ -55,7 +59,7 @@ jobs:
           if [ -z "$REF" ]; then
             REF=$(gh api "repos/$UPSTREAM/releases/latest" --jq .tag_name)
           fi
-          PATCHSET=$(cat fork/patches/*.patch | sha256sum | cut -c1-12)
+          PATCHSET=$(cat fork/patches/*.patch fork/.github/workflows/typing-build.yml | sha256sum | cut -c1-12)
           echo "ref=$REF" >> "$GITHUB_OUTPUT"
           echo "patchset=$PATCHSET" >> "$GITHUB_OUTPUT"
           BUILD=yes
@@ -93,6 +97,9 @@ jobs:
               problem="$problem\n* \`$name\`: does not apply on upstream $REF. Rebase it on the new upstream code."
             fi
           done
+          if ! grep -Eq '^static const char \*SIGN = "[0-9A-F]{40}";' TMessagesProj/jni/integrity/integrity.cpp; then
+            problem="$problem\n* The signer check in \`TMessagesProj/jni/integrity/integrity.cpp\` changed shape upstream, so this fork's key can no longer be pinned there. Update the \"Pin this fork's signer\" steps."
+          fi
           if [ -n "$problem" ]; then
             title="Typing fix build stopped on upstream $REF"
             body=$(printf "The scheduled build did not ship a new APK.\n%b\n\nRun: %s/%s/actions/runs/%s" "$problem" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_RUN_ID")
@@ -215,6 +222,12 @@ jobs:
         with:
           repository: ${{ env.UPSTREAM }}
           ref: ${{ needs.check.outputs.ref }}
+      - name: Pin this fork's signer
+        run: |
+          set -euo pipefail
+          f=TMessagesProj/jni/integrity/integrity.cpp
+          sed -i -E "s/^static const char \*SIGN = \"[0-9A-F]{40}\";/static const char *SIGN = \"$SIGNER_SHA1\";/" "$f"
+          grep -q "SIGN = \"$SIGNER_SHA1\"" "$f"
       - name: Fetch Status
         run: |
           sed -i 's/\/\///g' settings.gradle
@@ -297,6 +310,12 @@ jobs:
             echo "Applied $(basename "$p")"
           done
           git diff --stat
+      - name: Pin this fork's signer
+        run: |
+          set -euo pipefail
+          f=TMessagesProj/jni/integrity/integrity.cpp
+          sed -i -E "s/^static const char \*SIGN = \"[0-9A-F]{40}\";/static const char *SIGN = \"$SIGNER_SHA1\";/" "$f"
+          grep -q "SIGN = \"$SIGNER_SHA1\"" "$f"
       - name: Set up JDK 17
         uses: actions/setup-java@v6
         with:

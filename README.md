@@ -17,6 +17,8 @@ The fix builds the per dialog maps once, before the topic loop. See [patches/000
 3. It checks every patch. If a patch no longer applies, or upstream already contains the change, the run fails and opens an issue here instead of shipping a stale build.
 4. It builds the arm64 release APK with Nagram's own build steps, signs it with this fork's own key, checks the signer and publishes a GitHub Release tagged `<upstream release>-typing-<patch set>`.
 
+Nagram's native library checks the APK signer at startup against a SHA-1 compiled into `TMessagesProj/jni/integrity/integrity.cpp`. The workflow swaps in this fork's own certificate SHA-1 before the native build, and stops with an issue if that check ever changes shape upstream.
+
 ## Installing
 
 Download the APK from [Releases](https://github.com/firestarter1996/Nagram/releases), or add `https://github.com/firestarter1996/Nagram` to [Obtainium](https://github.com/ImranR98/Obtainium) for automatic updates.
