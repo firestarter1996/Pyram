@@ -209,18 +209,19 @@ jobs:
           echo "y" | sdkmanager --install "ndk;$NDK_VERSION" --sdk_root=${ANDROID_SDK_ROOT} &> /dev/null
           echo "sdk.dir=${ANDROID_HOME}" > local.properties
           echo "ndk.dir=${ANDROID_HOME}/ndk/$NDK_VERSION" >> local.properties
-      - name: Checkout Library
-        run: |
-          git submodule update --init
-      - name: Fetch Status
-        run: |
-          sed -i 's/\/\///g' settings.gradle
+      # Restore before the submodule checkout: the native job hashes jni/ before its submodules exist, so the key only matches here in the same state
       - name: Native Cache
         uses: actions/cache@v6
         with:
           path: |
             TMessagesProj/src/main/libs
           key: ${{ hashFiles('TMessagesProj/jni/**') }}-${{ env.ABI }}
+      - name: Checkout Library
+        run: |
+          git submodule update --init
+      - name: Fetch Status
+        run: |
+          sed -i 's/\/\///g' settings.gradle
       - name: Check native libs were restored
         run: |
           ls -la TMessagesProj/src/main/libs/$ABI/
