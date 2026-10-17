@@ -1,0 +1,146 @@
+From 5ad38e55801676380af40f5a36cdbc703ad71c88 Mon Sep 17 00:00:00 2001
+From: firestarter1996 <firestarter1996@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 08:37:14 -0700
+Subject: [PATCH 3/6] Topic tabs: the topic I sent to most recently sits on the
+ left
+
+Records the time of my last send per forum topic and orders the tabs by it, right after All and
+any pinned topics. Topics I never wrote to keep the server order after them.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../telegram/messenger/TopicSentOrder.java    | 54 +++++++++++++++++++
+ .../java/org/telegram/ui/ChatActivity.java    |  7 +++
+ .../ui/Components/TopicsTabsView.java         | 12 ++++-
+ 3 files changed, 71 insertions(+), 2 deletions(-)
+ create mode 100644 TMessagesProj/src/main/java/org/telegram/messenger/TopicSentOrder.java
+
+diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/TopicSentOrder.java b/TMessagesProj/src/main/java/org/telegram/messenger/TopicSentOrder.java
+new file mode 100644
+index 00000000..d38dd72f
+--- /dev/null
++++ b/TMessagesProj/src/main/java/org/telegram/messenger/TopicSentOrder.java
+@@ -0,0 +1,54 @@
++package org.telegram.messenger;
++
++import android.app.Activity;
++import android.content.SharedPreferences;
++
++import org.telegram.tgnet.TLRPC;
++
++import java.util.ArrayList;
++import java.util.Collections;
++
++/**
++ * Remembers when I last sent a message into each forum topic, so the topic tabs can show the topic
++ * I wrote to most recently on the left (right after All and any pinned topics).
++ */
++public class TopicSentOrder {
++
++    private static final SharedPreferences[] prefs = new SharedPreferences[UserConfig.MAX_ACCOUNT_COUNT];
++
++    private static SharedPreferences getPrefs(int account) {
++        if (prefs[account] == null) {
++            prefs[account] = ApplicationLoader.applicationContext.getSharedPreferences("nagram_topic_sent" + account, Activity.MODE_PRIVATE);
++        }
++        return prefs[account];
++    }
++
++    public static void markSent(int account, long chatId, long topicId) {
++        if (topicId == 0) {
++            topicId = 1;
++        }
++        getPrefs(account).edit().putLong(chatId + "_" + topicId, System.currentTimeMillis()).apply();
++    }
++
++    public static long getSent(int account, long chatId, long topicId) {
++        return getPrefs(account).getLong(chatId + "_" + topicId, 0);
++    }
++
++    public static ArrayList<TLRPC.TL_forumTopic> sort(int account, long chatId, ArrayList<TLRPC.TL_forumTopic> topics) {
++        if (topics == null || topics.size() < 2) {
++            return topics;
++        }
++        final ArrayList<TLRPC.TL_forumTopic> sorted = new ArrayList<>(topics);
++        // stable sort: pinned topics keep their order, never used topics keep the server order
++        Collections.sort(sorted, (a, b) -> {
++            if (a.pinned != b.pinned) {
++                return a.pinned ? -1 : 1;
++            }
++            if (a.pinned) {
++                return 0;
++            }
++            return Long.compare(getSent(account, chatId, b.id), getSent(account, chatId, a.id));
++        });
++        return sorted;
++    }
++}
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+index dfb033f6..eee0f422 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+@@ -176,6 +176,7 @@ import org.telegram.messenger.ImageReceiver;
+ import org.telegram.messenger.LiteMode;
+ import org.telegram.messenger.LocaleController;
+ import org.telegram.messenger.LocalDraftJournal;
++import org.telegram.messenger.TopicSentOrder;
+ import org.telegram.messenger.MediaController;
+ import org.telegram.messenger.MediaDataController;
+ import org.telegram.messenger.SendMessageChatArguments;
+@@ -2207,6 +2208,12 @@ public class ChatActivity extends BaseFragment implements
+ 
+         @Override
+         public void onMessageSend(CharSequence message, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
++            if (ChatObject.isForum(currentChat) && !ChatObject.isMonoForum(currentChat) && scheduleDate == 0) {
++                TopicSentOrder.markSent(currentAccount, currentChat.id, getDraftThreadId());
++                if (topicsTabs != null) {
++                    topicsTabs.onTopicSent();
++                }
++            }
+             clearDraftJournal();
+             if (chatListItemAnimator != null) {
+                 chatActivityEnterViewAnimateFromTop = chatActivityEnterView.getBackgroundTop();
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java b/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java
+index 74722f50..7d592062 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java
+@@ -50,6 +50,7 @@ import org.telegram.messenger.MessagesController;
+ import org.telegram.messenger.NotificationCenter;
+ import org.telegram.messenger.NotificationsController;
+ import org.telegram.messenger.R;
++import org.telegram.messenger.TopicSentOrder;
+ import org.telegram.messenger.TopicsController;
+ import org.telegram.messenger.UserConfig;
+ import org.telegram.messenger.UserObject;
+@@ -641,6 +642,13 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
+     }
+ 
+     private long currentTopicId;
++
++    public void onTopicSent() {
++        topTabs.scrollToPosition(0);
++        sideTabs.scrollToPosition(0);
++        updateTabs();
++    }
++
+     private void updateTabs() {
+         checkTopicsVisibility(true);
+ 
+@@ -718,7 +726,7 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
+         final TLRPC.Chat currentChat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
+         final TLRPC.User currentUser = MessagesController.getInstance(currentAccount).getUser(dialogId);
+         final TopicsController controller = MessagesController.getInstance(currentAccount).getTopicsController();
+-        final ArrayList<TLRPC.TL_forumTopic> topics = controller.getTopics(-dialogId);
++        final ArrayList<TLRPC.TL_forumTopic> topics = mono ? controller.getTopics(-dialogId) : TopicSentOrder.sort(currentAccount, -dialogId, controller.getTopics(-dialogId));
+         if (!bot) {
+             items.add(VerticalTabView.Factory.asAll(bot, mono).setChecked(currentTopicId == 0));
+         }
+@@ -755,7 +763,7 @@ public class TopicsTabsView extends FrameLayout implements NotificationCenter.No
+         final TLRPC.Chat currentChat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
+         final TLRPC.User currentUser = MessagesController.getInstance(currentAccount).getUser(dialogId);
+         final TopicsController controller = MessagesController.getInstance(currentAccount).getTopicsController();
+-        final ArrayList<TLRPC.TL_forumTopic> topics = controller.getTopics(-dialogId);
++        final ArrayList<TLRPC.TL_forumTopic> topics = mono ? controller.getTopics(-dialogId) : TopicSentOrder.sort(currentAccount, -dialogId, controller.getTopics(-dialogId));
+         items.add(HorizontalTabView.Factory.asAll(bot, mono).setChecked(currentTopicId == 0));
+ 
+         boolean reorder = false;

@@ -1,12 +1,17 @@
-# Nagram with the forum topic typing fix
+# Nagram with a few quality of life fixes
 
-This branch builds [Nagram](https://github.com/NextAlone/Nagram) with one small fix: in a group with forum topics, "is typing" now shows in every topic where someone is typing, instead of only one of them.
+This branch builds [Nagram](https://github.com/NextAlone/Nagram) with these changes on top of the newest upstream release. The forum topic typing fix that started this fork is now part of upstream Nagram itself (release 1253), so it is no longer carried here.
 
-## The bug
+## What is changed
 
-`MessagesController.updatePrintingStrings()` loops over every topic that has someone typing. For each topic it made a brand new per dialog map and stored it in `newStrings`, so each topic replaced the one before it. Only the last topic in the hash walk kept its typing text. Stock Telegram for Android has the same code.
+* **Drafts never lose text.** A cloud draft update used to clear the input field when the open topic had no stored draft, and a late server echo could replace a newer, longer local draft with an older, shorter one. Both are fixed: a server draft older than the local one is ignored, and what you type is also kept in a small local copy, written on every change (debounced), so it survives a crash, a process kill or a reboot. A cloud draft that comes back shorter or empty never replaces the text you typed. A different draft written later on another device still wins.
+* **Select all** is back in the input field's long press menu.
+* **Topic tabs** put the topic you sent to most recently on the left. Pinned topics stay first in their own order; topics you never sent to keep the server order.
+* **Page up and page down** buttons sit with the other round buttons on the right of a chat and scroll by one screen. Each shows only when the chat can scroll that way.
+* **Fast scroll with dates.** A thumb on the right edge appears while a chat scrolls and can be dragged; a bubble beside it shows the date of the messages at the top of the screen. It covers the messages already loaded; dragging to the top loads older ones.
+* **Smooth bot progress bars.** A bot keyboard that works as a media player (a time button like `🔊 0:07 / 4:36` and a row of 16 emoji cells, both with callback data `tts:pos`) is only edited every few seconds. The time and a solid bar now move smoothly between edits.
 
-The fix builds the per dialog maps once, before the topic loop. See [patches/0001-forum-topic-typing.patch](patches/0001-forum-topic-typing.patch). The same change is offered upstream as a pull request.
+Each change is one patch in [patches/](patches/), in the order they are applied.
 
 ## How updates work
 
@@ -30,7 +35,7 @@ Signing certificate SHA-256:
 
 ## Source
 
-Everything except this branch is the upstream Nagram code. The fix itself lives on the `fix-forum-topic-typing` branch. Nagram is licensed under GPL 3.0, see the upstream [LICENSE](https://github.com/NextAlone/Nagram/blob/main/LICENSE).
+Everything except this branch is the upstream Nagram code. The changes live on the `features` branch, one commit per patch. Nagram is licensed under GPL 3.0, see the upstream [LICENSE](https://github.com/NextAlone/Nagram/blob/main/LICENSE).
 
 ## Star History
 

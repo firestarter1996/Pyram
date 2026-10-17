@@ -1,0 +1,106 @@
+From a85344a5668440eb45c56eff7e86b40bf1992ad4 Mon Sep 17 00:00:00 2001
+From: firestarter1996 <firestarter1996@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 08:39:00 -0700
+Subject: [PATCH 4/6] Chat: page up and page down buttons
+
+Two small buttons in the side controls scroll the chat by one screen. Each shows only when the
+chat can scroll that way.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/org/telegram/ui/ChatActivity.java    | 26 ++++++++++++++++++-
+ ...ChatActivitySideControlsButtonsLayout.java | 14 +++++++---
+ 2 files changed, 36 insertions(+), 4 deletions(-)
+
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+index eee0f422..1384a1d2 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+@@ -7247,6 +7247,7 @@ public class ChatActivity extends BaseFragment implements
+                 if (chatListThanosEffect != null) {
+                     chatListThanosEffect.scroll(dx, dy);
+                 }
++                updateScreenPageButtons();
+                 scrollUp = dy < 0;
+                 int firstVisibleItem = chatLayoutManager.findFirstVisibleItemPosition();
+                 if (dy != 0 && (scrollByTouch && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_SETTLING) || recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING) {
+@@ -49413,8 +49414,31 @@ public class ChatActivity extends BaseFragment implements
+         }
+     }
+ 
++    private void updateScreenPageButtons() {
++        if (sideControlsButtonsLayout == null || chatListView == null) {
++            return;
++        }
++        final boolean show = chatMode != MODE_SEARCH;
++        sideControlsButtonsLayout.showButton(ChatActivitySideControlsButtonsLayout.BUTTON_SCREEN_UP, show && chatListView.canScrollVertically(-1), true);
++        sideControlsButtonsLayout.showButton(ChatActivitySideControlsButtonsLayout.BUTTON_SCREEN_DOWN, show && chatListView.canScrollVertically(1), true);
++    }
++
++    private void scrollChatByScreen(int direction) {
++        if (chatListView == null) {
++            return;
++        }
++        wasManualScroll = true;
++        final int page = Math.max(dp(100), chatListView.getMeasuredHeight() - (int) chatListViewPaddingTop - blurredViewBottomOffset - dp(96));
++        chatListView.stopScroll();
++        chatListView.smoothScrollBy(0, direction * page);
++    }
++
+     private void onSideControlButtonOnClick(int buttonId, View v) {
+-        if (buttonId == ChatActivitySideControlsButtonsLayout.BUTTON_PAGE_DOWN) {
++        if (buttonId == ChatActivitySideControlsButtonsLayout.BUTTON_SCREEN_UP) {
++            scrollChatByScreen(-1);
++        } else if (buttonId == ChatActivitySideControlsButtonsLayout.BUTTON_SCREEN_DOWN) {
++            scrollChatByScreen(1);
++        } else if (buttonId == ChatActivitySideControlsButtonsLayout.BUTTON_PAGE_DOWN) {
+             onPageDownClicked();
+         } else if (buttonId == ChatActivitySideControlsButtonsLayout.BUTTON_MENTION) {
+             loadLastUnreadMention();
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Components/chat/layouts/ChatActivitySideControlsButtonsLayout.java b/TMessagesProj/src/main/java/org/telegram/ui/Components/chat/layouts/ChatActivitySideControlsButtonsLayout.java
+index a23f816a..04ee4e6b 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/Components/chat/layouts/ChatActivitySideControlsButtonsLayout.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/Components/chat/layouts/ChatActivitySideControlsButtonsLayout.java
+@@ -34,8 +34,10 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
+     public static final int BUTTON_POLL_VOTES = 4;
+     public static final int BUTTON_SEARCH_DOWN = 5;
+     public static final int BUTTON_SEARCH_UP = 6;
++    public static final int BUTTON_SCREEN_DOWN = 7;
++    public static final int BUTTON_SCREEN_UP = 8;
+ 
+-    private static final int BUTTONS_COUNT = 7;
++    private static final int BUTTONS_COUNT = 9;
+ 
+     private static final int ANIMATOR_ID_VISIBILITY = 1;
+     private static final int ANIMATOR_ID_COUNTER_VISIBILITY = 2;
+@@ -47,7 +49,9 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
+         R.drawable.reactionbutton,
+         R.drawable.menu_poll_notify,
+         R.drawable.pagedown,
+-        R.drawable.pagedown
++        R.drawable.pagedown,
++        R.drawable.msg_go_down,
++        R.drawable.msg_go_up
+     };
+ 
+     private final String[] buttonDescriptions = new String[] {
+@@ -57,7 +61,9 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
+         LocaleController.getString(R.string.AccDescrReactionMentionDown),
+         LocaleController.getString(R.string.AccDescrPollVotesMentionDown),
+         LocaleController.getString(R.string.AccDescrSearchPrev),
+-        LocaleController.getString(R.string.AccDescrSearchNext)
++        LocaleController.getString(R.string.AccDescrSearchNext),
++        "Page down",
++        "Page up"
+     };
+ 
+     private final Theme.ResourcesProvider resourcesProvider;
+@@ -227,6 +233,8 @@ public class ChatActivitySideControlsButtonsLayout extends FrameLayout implement
+             if (buttonId == BUTTON_ATTACH) {
+                 size = 50;
+                 iconSize = 32;
++            } else if (buttonId == BUTTON_SCREEN_DOWN || buttonId == BUTTON_SCREEN_UP) {
++                iconSize = 28;
+             }
+             final ChatActivityBlurredRoundPageDownButton button = ChatActivityBlurredRoundPageDownButton.create(
+                 getContext(),

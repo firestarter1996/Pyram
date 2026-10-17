@@ -1,0 +1,306 @@
+From 95328c60386740a7d4f5f8e1a298802b9defd75f Mon Sep 17 00:00:00 2001
+From: firestarter1996 <firestarter1996@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 08:42:27 -0700
+Subject: [PATCH 5/6] Chat: fast scroll thumb with a date bubble
+
+A thumb on the right edge appears while the chat scrolls and can be dragged. A bubble beside it
+shows the date of the messages at the top of the screen.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ .../java/org/telegram/ui/ChatActivity.java    |  17 ++
+ .../ui/Components/ChatFastScroller.java       | 243 ++++++++++++++++++
+ 2 files changed, 260 insertions(+)
+ create mode 100644 TMessagesProj/src/main/java/org/telegram/ui/Components/ChatFastScroller.java
+
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+index 1384a1d2..988728de 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+@@ -7248,6 +7248,9 @@ public class ChatActivity extends BaseFragment implements
+                     chatListThanosEffect.scroll(dx, dy);
+                 }
+                 updateScreenPageButtons();
++                if (chatFastScroller != null) {
++                    chatFastScroller.onListScrolled(dy);
++                }
+                 scrollUp = dy < 0;
+                 int firstVisibleItem = chatLayoutManager.findFirstVisibleItemPosition();
+                 if (dy != 0 && (scrollByTouch && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_SETTLING) || recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING) {
+@@ -7384,6 +7387,18 @@ public class ChatActivity extends BaseFragment implements
+         });
+ 
+         contentView.addView(chatListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
++        chatFastScroller = new ChatFastScroller(context, chatListView, new ChatFastScroller.Insets() {
++            @Override
++            public int getTop() {
++                return (int) chatListViewPaddingTop;
++            }
++
++            @Override
++            public int getBottom() {
++                return blurredViewBottomOffset + (chatActivityEnterView != null && chatActivityEnterView.getVisibility() == View.VISIBLE ? chatActivityEnterView.getMeasuredHeight() : 0) + dp(56);
++            }
++        }, themeDelegate);
++        contentView.addView(chatFastScroller, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+ 
+         chatActivityFadeView = new ChatActivityFadeView(context);
+         chatActivityFadeView.setup(navbarContentDrawableFactory);
+@@ -49414,6 +49429,8 @@ public class ChatActivity extends BaseFragment implements
+         }
+     }
+ 
++    private ChatFastScroller chatFastScroller;
++
+     private void updateScreenPageButtons() {
+         if (sideControlsButtonsLayout == null || chatListView == null) {
+             return;
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatFastScroller.java b/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatFastScroller.java
+new file mode 100644
+index 00000000..2669471a
+--- /dev/null
++++ b/TMessagesProj/src/main/java/org/telegram/ui/Components/ChatFastScroller.java
+@@ -0,0 +1,243 @@
++package org.telegram.ui.Components;
++
++import static org.telegram.messenger.AndroidUtilities.dp;
++
++import android.annotation.SuppressLint;
++import android.content.Context;
++import android.graphics.Canvas;
++import android.graphics.Color;
++import android.graphics.Paint;
++import android.graphics.RectF;
++import android.text.TextPaint;
++import android.view.MotionEvent;
++import android.view.View;
++
++import androidx.recyclerview.widget.LinearLayoutManager;
++import androidx.recyclerview.widget.RecyclerView;
++
++import org.telegram.messenger.AndroidUtilities;
++import org.telegram.messenger.LocaleController;
++import org.telegram.messenger.MessageObject;
++import org.telegram.ui.ActionBar.Theme;
++import org.telegram.ui.Cells.ChatActionCell;
++import org.telegram.ui.Cells.ChatMessageCell;
++
++/**
++ * Draggable scroll thumb on the right edge of a chat, with a bubble showing the date of the
++ * messages at the top of the screen. Appears while the chat scrolls, fades out after it stops.
++ * Only covers the messages already loaded; dragging to the top makes the chat load older ones.
++ */
++@SuppressLint("ViewConstructor")
++public class ChatFastScroller extends View {
++
++    public interface Insets {
++        int getTop();
++        int getBottom();
++    }
++
++    private static final long HIDE_DELAY = 1500;
++
++    private final RecyclerListView listView;
++    private final Insets insets;
++    private final Theme.ResourcesProvider resourcesProvider;
++
++    private final Paint thumbPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final Paint bubblePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
++    private final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
++    private final RectF rect = new RectF();
++
++    private float visibleProgress;
++    private boolean shown;
++    private boolean dragging;
++    private float thumbY;
++    private float dragOffset;
++    private long lastFrame;
++    private String dateText;
++
++    private final Runnable hideRunnable = () -> {
++        shown = false;
++        invalidate();
++    };
++
++    public ChatFastScroller(Context context, RecyclerListView listView, Insets insets, Theme.ResourcesProvider resourcesProvider) {
++        super(context);
++        this.listView = listView;
++        this.insets = insets;
++        this.resourcesProvider = resourcesProvider;
++        textPaint.setTextSize(dp(14));
++        textPaint.setTypeface(AndroidUtilities.bold());
++        textPaint.setColor(Color.WHITE);
++        bubblePaint.setColor(0xB3000000);
++    }
++
++    public void onListScrolled(int dy) {
++        if (dy == 0 && !dragging) {
++            return;
++        }
++        if (!canScroll()) {
++            return;
++        }
++        shown = true;
++        AndroidUtilities.cancelRunOnUIThread(hideRunnable);
++        if (!dragging) {
++            AndroidUtilities.runOnUIThread(hideRunnable, HIDE_DELAY);
++        }
++        updateDate();
++        invalidate();
++    }
++
++    private boolean canScroll() {
++        return listView.canScrollVertically(-1) || listView.canScrollVertically(1);
++    }
++
++    private int trackTop() {
++        return insets.getTop() + dp(8);
++    }
++
++    private int trackBottom() {
++        return getMeasuredHeight() - insets.getBottom() - dp(8);
++    }
++
++    private int thumbHeight() {
++        return dp(48);
++    }
++
++    private float scrollFraction() {
++        int range = listView.computeVerticalScrollRange() - listView.computeVerticalScrollExtent();
++        if (range <= 0) {
++            return 0;
++        }
++        return Math.max(0, Math.min(1, listView.computeVerticalScrollOffset() / (float) range));
++    }
++
++    private void updateDate() {
++        int date = 0;
++        int bestTop = Integer.MAX_VALUE;
++        int top = insets.getTop();
++        for (int i = 0; i < listView.getChildCount(); i++) {
++            View child = listView.getChildAt(i);
++            MessageObject message = null;
++            if (child instanceof ChatMessageCell) {
++                message = ((ChatMessageCell) child).getMessageObject();
++            } else if (child instanceof ChatActionCell) {
++                message = ((ChatActionCell) child).getMessageObject();
++            }
++            if (message == null || message.messageOwner == null || message.messageOwner.date == 0) {
++                continue;
++            }
++            if (child.getBottom() > top && child.getTop() < bestTop) {
++                bestTop = child.getTop();
++                date = message.messageOwner.date;
++            }
++        }
++        if (date != 0) {
++            dateText = LocaleController.formatDateChat(date);
++        }
++    }
++
++    @Override
++    @SuppressLint("ClickableViewAccessibility")
++    public boolean onTouchEvent(MotionEvent event) {
++        final float x = event.getX(), y = event.getY();
++        switch (event.getActionMasked()) {
++            case MotionEvent.ACTION_DOWN: {
++                if (visibleProgress < 0.5f || x < getMeasuredWidth() - dp(36) || y < thumbY - dp(12) || y > thumbY + thumbHeight() + dp(12)) {
++                    return false;
++                }
++                dragging = true;
++                dragOffset = y - thumbY;
++                AndroidUtilities.cancelRunOnUIThread(hideRunnable);
++                listView.stopScroll();
++                getParent().requestDisallowInterceptTouchEvent(true);
++                invalidate();
++                return true;
++            }
++            case MotionEvent.ACTION_MOVE: {
++                if (!dragging) {
++                    return false;
++                }
++                int span = trackBottom() - trackTop() - thumbHeight();
++                if (span <= 0) {
++                    return true;
++                }
++                float fraction = Math.max(0, Math.min(1, (y - dragOffset - trackTop()) / span));
++                scrollToFraction(fraction);
++                return true;
++            }
++            case MotionEvent.ACTION_UP:
++            case MotionEvent.ACTION_CANCEL: {
++                if (!dragging) {
++                    return false;
++                }
++                dragging = false;
++                AndroidUtilities.runOnUIThread(hideRunnable, HIDE_DELAY);
++                invalidate();
++                return true;
++            }
++        }
++        return dragging;
++    }
++
++    private void scrollToFraction(float fraction) {
++        RecyclerView.LayoutManager lm = listView.getLayoutManager();
++        RecyclerView.Adapter<?> adapter = listView.getAdapter();
++        if (!(lm instanceof LinearLayoutManager) || adapter == null || adapter.getItemCount() == 0) {
++            return;
++        }
++        LinearLayoutManager layoutManager = (LinearLayoutManager) lm;
++        int last = adapter.getItemCount() - 1;
++        int position = Math.round((layoutManager.getReverseLayout() ? 1 - fraction : fraction) * last);
++        layoutManager.scrollToPositionWithOffset(position, layoutManager.getReverseLayout() ? 0 : insets.getTop());
++        listView.post(() -> {
++            updateDate();
++            invalidate();
++        });
++    }
++
++    @Override
++    protected void onDraw(Canvas canvas) {
++        long now = System.currentTimeMillis();
++        long dt = Math.min(32, now - lastFrame);
++        lastFrame = now;
++        float target = (shown || dragging) ? 1 : 0;
++        if (visibleProgress != target) {
++            float step = dt / 180f;
++            visibleProgress = target > visibleProgress ? Math.min(target, visibleProgress + step) : Math.max(target, visibleProgress - step);
++            invalidate();
++        }
++        if (visibleProgress <= 0) {
++            return;
++        }
++        int span = trackBottom() - trackTop() - thumbHeight();
++        if (span <= 0) {
++            return;
++        }
++        thumbY = trackTop() + span * scrollFraction();
++        int alpha = (int) (255 * visibleProgress);
++
++        int accent = Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider);
++        thumbPaint.setColor(dragging ? accent : 0xFF8E8E93);
++        thumbPaint.setAlpha(alpha);
++        float w = dp(dragging ? 6 : 4);
++        rect.set(getMeasuredWidth() - dp(6) - w, thumbY, getMeasuredWidth() - dp(6), thumbY + thumbHeight());
++        canvas.drawRoundRect(rect, w / 2, w / 2, thumbPaint);
++
++        if (dateText != null) {
++            float tw = textPaint.measureText(dateText);
++            float bh = dp(32);
++            float cy = thumbY + thumbHeight() / 2f;
++            float right = getMeasuredWidth() - dp(22);
++            rect.set(right - tw - dp(24), cy - bh / 2, right, cy + bh / 2);
++            bubblePaint.setAlpha((int) (0xB3 * visibleProgress));
++            canvas.drawRoundRect(rect, bh / 2, bh / 2, bubblePaint);
++            textPaint.setAlpha(alpha);
++            canvas.drawText(dateText, rect.left + dp(12), cy - (textPaint.descent() + textPaint.ascent()) / 2, textPaint);
++        }
++    }
++
++    @Override
++    protected void onDetachedFromWindow() {
++        super.onDetachedFromWindow();
++        AndroidUtilities.cancelRunOnUIThread(hideRunnable);
++    }
++}

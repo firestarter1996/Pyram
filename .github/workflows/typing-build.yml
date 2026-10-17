@@ -387,5 +387,5 @@ jobs:
           cp "$APK" "$OUT"
           (cd _out && sha256sum "$(basename "$OUT")" > "$(basename "$OUT").sha256")
           LIST=$(cd _fork/patches && ls *.patch | sed 's/^/* /')
-          NOTES=$(printf "Nagram %s (upstream release %s) with the forum topic typing fix.\n\nUpstream release: https://github.com/%s/releases/tag/%s\nPatch set: %s\nSigned with this fork's own key (certificate SHA-256 %s).\n\nPatches:\n%s" "$VNAME" "$REF" "$UPSTREAM" "$REF" "$PATCHSET" "$CERT" "$LIST")
-          gh release create "$TAG" "$OUT" "$OUT.sha256" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Nagram $VNAME ($REF) typing fix" --notes "$NOTES" --latest
+          NOTES=$(printf "Nagram %s (upstream release %s) with the patches below.\n\nUpstream release: https://github.com/%s/releases/tag/%s\nPatch set: %s\nSigned with this fork's own key (certificate SHA-256 %s).\n\nPatches:\n%s" "$VNAME" "$REF" "$UPSTREAM" "$REF" "$PATCHSET" "$CERT" "$LIST")
+          gh release create "$TAG" "$OUT" "$OUT.sha256" -R "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Nagram $VNAME ($REF) with fixes" --notes "$NOTES" --latest

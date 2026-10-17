@@ -1,0 +1,41 @@
+From 3bfad77d0bca728d480433d4195c693fcbe50074 Mon Sep 17 00:00:00 2001
+From: firestarter1996 <firestarter1996@users.noreply.github.com>
+Date: Sat, 17 Oct 2026 08:36:19 -0700
+Subject: [PATCH 2/6] Input field: bring back Select all in the long press menu
+
+fillActionModeMenu clears the system menu and only adds Cut, Copy and Paste back, so Select all
+was lost. Add it after Paste and handle it in EditTextCaption so the toolbar stays open.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java | 1 +
+ .../main/java/org/telegram/ui/Components/EditTextCaption.java | 4 ++++
+ 2 files changed, 5 insertions(+)
+
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+index 244b8604..dfb033f6 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
+@@ -28601,6 +28601,7 @@ public class ChatActivity extends BaseFragment implements
+         menu.add(android.R.id.cut, android.R.id.cut, order++, android.R.string.cut);
+         menu.add(android.R.id.copy, android.R.id.copy, order++, android.R.string.copy);
+         menu.add(android.R.id.paste, android.R.id.paste, order++, android.R.string.paste);
++        menu.add(android.R.id.selectAll, android.R.id.selectAll, order++, android.R.string.selectAll);
+ 
+         menu.add(R.id.menu_translate, R.id.menu_translate, order++, LocaleController.getString(R.string.Translate));
+         SpannableStringBuilder stringBuilder;
+diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Components/EditTextCaption.java b/TMessagesProj/src/main/java/org/telegram/ui/Components/EditTextCaption.java
+index 1e7c5f5c..304579ad 100644
+--- a/TMessagesProj/src/main/java/org/telegram/ui/Components/EditTextCaption.java
++++ b/TMessagesProj/src/main/java/org/telegram/ui/Components/EditTextCaption.java
+@@ -977,6 +977,10 @@ public class EditTextCaption extends EditTextBoldCursor implements FloatingToolb
+ 
+             @Override
+             public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
++                if (item.getItemId() == android.R.id.selectAll) {
++                    onTextContextMenuItem(android.R.id.selectAll);
++                    return true;
++                }
+                 if (performMenuAction(item.getItemId())) {
+                     mode.finish();
+                     return true;
