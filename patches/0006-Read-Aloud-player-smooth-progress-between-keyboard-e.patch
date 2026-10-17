@@ -1,4 +1,4 @@
-From 2ffd6d64c7e18088007d1cfbc550dc13a6df20e1 Mon Sep 17 00:00:00 2001
+From 853000c7c41c9f3accfad56a20c9241a0cd285f7 Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 08:46:20 -0700
 Subject: [PATCH 6/6] Read Aloud player: smooth progress between keyboard edits
@@ -228,3 +228,6 @@ index 00000000..0ad64b15
 +        }
 +    }
 +}
+-- 
+2.56.0.windows.2
+

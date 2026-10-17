@@ -1,147 +1,21 @@
-From 569fd941669f1857882c45e308bcddf4fd979962 Mon Sep 17 00:00:00 2001
+From 97b3ff771720af467a152f099aa52f9ccf84bd7e Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
-Date: Sat, 17 Oct 2026 08:35:33 -0700
-Subject: [PATCH 1/6] Drafts: never clear typed text on a cloud draft update,
- keep a local copy on every change
+Date: Sat, 17 Oct 2026 13:08:06 -0700
+Subject: [PATCH 1/6] Drafts: never clear typed text on a cloud draft update
 
 A draft update for any topic of a forum group called applyDraftMaybe(true), which cleared the
 input field whenever the current topic had no stored draft yet (drafts were only stored on
 pause or topic switch). Late server echoes of an older save could also replace a newer local
 draft, so reopening a topic showed a shortened text.
 
-Now a cloud update never clears the field, stale server drafts are ignored, and the field is
-written to a local journal 300 ms after every change, so a draft survives crashes and reboots.
-The journal wins when the cloud draft is missing or a cut short copy of it.
+Now a cloud update never clears the field, and stale server drafts are ignored.
 
 Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
 ---
- .../telegram/messenger/LocalDraftJournal.java | 115 ++++++++++++++++++
- .../messenger/MediaDataController.java        |   9 +-
- .../java/org/telegram/ui/ChatActivity.java    |  73 ++++++++++-
- 3 files changed, 194 insertions(+), 3 deletions(-)
- create mode 100644 TMessagesProj/src/main/java/org/telegram/messenger/LocalDraftJournal.java
+ .../java/org/telegram/messenger/MediaDataController.java | 9 ++++++++-
+ .../src/main/java/org/telegram/ui/ChatActivity.java      | 2 +-
+ 2 files changed, 9 insertions(+), 2 deletions(-)
 
-diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/LocalDraftJournal.java b/TMessagesProj/src/main/java/org/telegram/messenger/LocalDraftJournal.java
-new file mode 100644
-index 00000000..75e24968
---- /dev/null
-+++ b/TMessagesProj/src/main/java/org/telegram/messenger/LocalDraftJournal.java
-@@ -0,0 +1,115 @@
-+package org.telegram.messenger;
-+
-+import android.app.Activity;
-+import android.content.SharedPreferences;
-+import android.text.TextUtils;
-+
-+import org.telegram.tgnet.SerializedData;
-+import org.telegram.tgnet.TLRPC;
-+
-+import java.util.ArrayList;
-+
-+/**
-+ * Local copy of what is typed in the input field, written on every change (debounced by the caller)
-+ * so a draft survives a crash, a process kill or a reboot, and so a cloud draft that comes back
-+ * shorter (or empty) never replaces the text that was actually typed.
-+ * Kept apart from MediaDataController's "drafts" prefs, which cloud draft updates overwrite.
-+ */
-+public class LocalDraftJournal {
-+
-+    private static final SharedPreferences[] prefs = new SharedPreferences[UserConfig.MAX_ACCOUNT_COUNT];
-+
-+    private static SharedPreferences getPrefs(int account) {
-+        if (prefs[account] == null) {
-+            prefs[account] = ApplicationLoader.applicationContext.getSharedPreferences("nagram_draft_journal" + account, Activity.MODE_PRIVATE);
-+        }
-+        return prefs[account];
-+    }
-+
-+    private static String key(long dialogId, long threadId) {
-+        return dialogId + "_" + threadId;
-+    }
-+
-+    public static void put(int account, long dialogId, long threadId, CharSequence text, ArrayList<TLRPC.MessageEntity> entities, boolean noWebpage) {
-+        if (TextUtils.isEmpty(text)) {
-+            return;
-+        }
-+        try {
-+            TLRPC.TL_draftMessage draft = new TLRPC.TL_draftMessage();
-+            draft.date = (int) (System.currentTimeMillis() / 1000);
-+            draft.message = text.toString();
-+            draft.no_webpage = noWebpage;
-+            if (entities != null && !entities.isEmpty()) {
-+                draft.entities = entities;
-+                draft.flags |= 8;
-+            }
-+            SerializedData data = new SerializedData(draft.getObjectSize());
-+            draft.serializeToStream(data);
-+            getPrefs(account).edit().putString(key(dialogId, threadId), Utilities.bytesToHex(data.toByteArray())).apply();
-+            data.cleanup();
-+        } catch (Exception e) {
-+            FileLog.e(e);
-+        }
-+    }
-+
-+    public static TLRPC.DraftMessage get(int account, long dialogId, long threadId) {
-+        String hex = getPrefs(account).getString(key(dialogId, threadId), null);
-+        if (hex == null) {
-+            return null;
-+        }
-+        try {
-+            SerializedData data = new SerializedData(Utilities.hexToBytes(hex));
-+            TLRPC.DraftMessage draft = TLRPC.DraftMessage.TLdeserialize(data, data.readInt32(true), true);
-+            data.cleanup();
-+            if (draft == null || TextUtils.isEmpty(draft.message)) {
-+                return null;
-+            }
-+            return draft;
-+        } catch (Exception e) {
-+            FileLog.e(e);
-+            return null;
-+        }
-+    }
-+
-+    public static void remove(int account, long dialogId, long threadId) {
-+        SharedPreferences p = getPrefs(account);
-+        String k = key(dialogId, threadId);
-+        if (p.contains(k)) {
-+            p.edit().remove(k).apply();
-+        }
-+    }
-+
-+    /**
-+     * Picks what goes into the field: the cloud draft, unless the local copy holds text the cloud one
-+     * lost (cloud empty, or a shortened copy of the local text, or simply older).
-+     * A cloud draft written later on another device with different text still wins.
-+     */
-+    public static TLRPC.DraftMessage merge(TLRPC.DraftMessage cloud, TLRPC.DraftMessage local) {
-+        if (local == null || TextUtils.isEmpty(local.message)) {
-+            return cloud;
-+        }
-+        if (cloud == null || TextUtils.isEmpty(cloud.message)) {
-+            if (cloud != null && cloud.reply_to != null) {
-+                local.reply_to = cloud.reply_to;
-+                local.flags |= 16;
-+            }
-+            return local;
-+        }
-+        if (TextUtils.equals(cloud.message, local.message)) {
-+            return cloud;
-+        }
-+        boolean truncated = local.message.startsWith(cloud.message);
-+        if (!truncated && cloud.date > local.date + 2) {
-+            return cloud;
-+        }
-+        if (cloud.reply_to != null) {
-+            local.reply_to = cloud.reply_to;
-+            local.flags |= 16;
-+        }
-+        if (cloud.effect != 0) {
-+            local.effect = cloud.effect;
-+            local.flags |= 128;
-+        }
-+        return local;
-+    }
-+}
 diff --git a/TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java b/TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java
 index 8a0e606e..6d70e674 100644
 --- a/TMessagesProj/src/main/java/org/telegram/messenger/MediaDataController.java
@@ -163,36 +37,10 @@ index 8a0e606e..6d70e674 100644
                  ((TLRPC.TL_inputReplyToMessage) draft.reply_to).reply_to_msg_id = 0;
              }
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-index 9a2003e8..244b8604 100644
+index 9a2003e8..2d44fd4e 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-@@ -175,6 +175,7 @@ import org.telegram.messenger.ImageReceiver;
- //import org.telegram.messenger.LanguageDetector;
- import org.telegram.messenger.LiteMode;
- import org.telegram.messenger.LocaleController;
-+import org.telegram.messenger.LocalDraftJournal;
- import org.telegram.messenger.MediaController;
- import org.telegram.messenger.MediaDataController;
- import org.telegram.messenger.SendMessageChatArguments;
-@@ -2206,6 +2207,7 @@ public class ChatActivity extends BaseFragment implements
- 
-         @Override
-         public void onMessageSend(CharSequence message, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
-+            clearDraftJournal();
-             if (chatListItemAnimator != null) {
-                 chatActivityEnterViewAnimateFromTop = chatActivityEnterView.getBackgroundTop();
-                 if (chatActivityEnterViewAnimateFromTop != 0) {
-@@ -2458,6 +2460,9 @@ public class ChatActivity extends BaseFragment implements
-         @Override
-         public void onTextChanged(final CharSequence text, boolean bigChange, boolean fromDraft) {
-             MediaController.getInstance().setInputFieldHasText(!TextUtils.isEmpty(text) || chatActivityEnterView.isEditingMessage());
-+            if (!fromDraft) {
-+                scheduleDraftJournal(text);
-+            }
-             if (mentionContainer != null && mentionContainer.getAdapter() != null) {
-                 mentionContainer.getAdapter().searchUsernameOrHashtag(text, chatActivityEnterView.getCursorPosition(), messages, false, false);
-             }
-@@ -24833,7 +24838,7 @@ public class ChatActivity extends BaseFragment implements
+@@ -24833,7 +24833,7 @@ public class ChatActivity extends BaseFragment implements
          } else if (id == NotificationCenter.newDraftReceived) {
              long did = (Long) args[0];
              if (did == dialog_id) {
@@ -201,94 +49,6 @@ index 9a2003e8..244b8604 100644
              }
          } else if (id == NotificationCenter.pinnedInfoDidLoad) {
              long did = (Long) args[0];
-@@ -30950,10 +30955,68 @@ public class ChatActivity extends BaseFragment implements
-         }
-     }
- 
-+    private Runnable draftJournalRunnable;
-+
-+    private boolean canJournalDraft() {
-+        return chatActivityEnterView != null && !chatActivityEnterView.isEditingMessage() && !chatActivityEnterView.isRichDraftActive() && currentEncryptedChat == null
-+            && (chatMode == 0 || chatMode == MODE_SAVED && getUserConfig().getClientUserId() == getSavedDialogId());
-+    }
-+
-+    private void scheduleDraftJournal(CharSequence text) {
-+        if (!canJournalDraft()) {
-+            return;
-+        }
-+        if (draftJournalRunnable != null) {
-+            AndroidUtilities.cancelRunOnUIThread(draftJournalRunnable);
-+            draftJournalRunnable = null;
-+        }
-+        final long did = dialog_id;
-+        final long threadId = getDraftThreadId();
-+        if (TextUtils.isEmpty(text)) {
-+            LocalDraftJournal.remove(currentAccount, did, threadId);
-+            return;
-+        }
-+        draftJournalRunnable = () -> {
-+            draftJournalRunnable = null;
-+            if (did == dialog_id && threadId == getDraftThreadId()) {
-+                writeDraftJournal();
-+            }
-+        };
-+        AndroidUtilities.runOnUIThread(draftJournalRunnable, 300);
-+    }
-+
-+    private void writeDraftJournal() {
-+        if (!canJournalDraft()) {
-+            return;
-+        }
-+        CharSequence text = chatActivityEnterView.getFieldText();
-+        if (TextUtils.isEmpty(text)) {
-+            return;
-+        }
-+        CharSequence[] message = new CharSequence[]{new SpannableStringBuilder(text)};
-+        ArrayList<TLRPC.MessageEntity> entities = getMediaDataController().getEntities(message, true, false);
-+        LocalDraftJournal.put(currentAccount, dialog_id, getDraftThreadId(), message[0], entities, !chatActivityEnterView.isMessageWebPageSearchEnabled());
-+    }
-+
-+    private void clearDraftJournal() {
-+        if (draftJournalRunnable != null) {
-+            AndroidUtilities.cancelRunOnUIThread(draftJournalRunnable);
-+            draftJournalRunnable = null;
-+        }
-+        LocalDraftJournal.remove(currentAccount, dialog_id, getDraftThreadId());
-+    }
-+
-     public void saveDraft() {
-         if (chatActivityEnterView != null && chatActivityEnterView.isRichDraftActive()) {
-             return;
-         }
-+        if (draftJournalRunnable != null) {
-+            AndroidUtilities.cancelRunOnUIThread(draftJournalRunnable);
-+            draftJournalRunnable = null;
-+        }
-+        if (!ignoreAttachOnPause && !ignoreDraft) {
-+            writeDraftJournal();
-+        }
-         CharSequence draftMessage = null;
-         MessageObject replyMessage = null;
-         boolean searchWebpage = true;
-@@ -31253,6 +31316,12 @@ public class ChatActivity extends BaseFragment implements
-         } else {
-             draftMessage = getMediaDataController().getDraft(dialog_id, chatMode == MODE_SAVED ? 0 : threadMessageId);
-         }
-+        // the local copy wins when the cloud draft is missing or came back cut short
-+        TLRPC.DraftMessage journalDraft = null;
-+        if (canJournalDraft()) {
-+            journalDraft = LocalDraftJournal.get(currentAccount, dialog_id, topicId != null ? topicId : (chatMode == MODE_SAVED ? 0 : threadMessageId));
-+            draftMessage = LocalDraftJournal.merge(draftMessage, journalDraft);
-+        }
-         chatActivityEnterView.setRichDraftPreview(draftMessage != null ? draftMessage.rich_message : null);
-         MediaDataController.DraftVoice voiceDraft = MediaDataController.getInstance(currentAccount).getDraftVoice(dialog_id, getTopicId());
-         TLRPC.Message draftReplyMessage = draftMessage != null && draftMessage.reply_to != null && draftMessage.reply_to.reply_to_msg_id != 0 ? getMediaDataController().getDraftMessage(dialog_id, topicId != null ? topicId : threadMessageId) : null;
-@@ -31343,7 +31412,7 @@ public class ChatActivity extends BaseFragment implements
-                 }
-                 chatActivityEnterView.setEffectId(draftMessage.effect);
-             }
--        } else if (canClear && draftMessage == null) {
-+        } else if (canClear && draftMessage == null && journalDraft == null) {
-             chatActivityEnterView.setFieldText("");
-             chatActivityEnterView.setEffectId(0);
-             hideFieldPanel(true);
+-- 
+2.56.0.windows.2
+

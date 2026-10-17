@@ -1,4 +1,4 @@
-From 5ad38e55801676380af40f5a36cdbc703ad71c88 Mon Sep 17 00:00:00 2001
+From 27a7437db401f67b75dcd28b9317ddc1bd4e9ee9 Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 08:37:14 -0700
 Subject: [PATCH 3/6] Topic tabs: the topic I sent to most recently sits on the
@@ -76,18 +76,18 @@ index 00000000..d38dd72f
 +    }
 +}
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-index dfb033f6..eee0f422 100644
+index 6cf023c2..e12cb3fc 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-@@ -176,6 +176,7 @@ import org.telegram.messenger.ImageReceiver;
+@@ -175,6 +175,7 @@ import org.telegram.messenger.ImageReceiver;
+ //import org.telegram.messenger.LanguageDetector;
  import org.telegram.messenger.LiteMode;
  import org.telegram.messenger.LocaleController;
- import org.telegram.messenger.LocalDraftJournal;
 +import org.telegram.messenger.TopicSentOrder;
  import org.telegram.messenger.MediaController;
  import org.telegram.messenger.MediaDataController;
  import org.telegram.messenger.SendMessageChatArguments;
-@@ -2207,6 +2208,12 @@ public class ChatActivity extends BaseFragment implements
+@@ -2206,6 +2207,12 @@ public class ChatActivity extends BaseFragment implements
  
          @Override
          public void onMessageSend(CharSequence message, boolean notify, int scheduleDate, int scheduleRepeatPeriod, long payStars) {
@@ -97,9 +97,9 @@ index dfb033f6..eee0f422 100644
 +                    topicsTabs.onTopicSent();
 +                }
 +            }
-             clearDraftJournal();
              if (chatListItemAnimator != null) {
                  chatActivityEnterViewAnimateFromTop = chatActivityEnterView.getBackgroundTop();
+                 if (chatActivityEnterViewAnimateFromTop != 0) {
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java b/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java
 index 74722f50..7d592062 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/Components/TopicsTabsView.java
@@ -144,3 +144,6 @@ index 74722f50..7d592062 100644
          items.add(HorizontalTabView.Factory.asAll(bot, mono).setChecked(currentTopicId == 0));
  
          boolean reorder = false;
+-- 
+2.56.0.windows.2
+

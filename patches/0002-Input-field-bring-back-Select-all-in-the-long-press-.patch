@@ -1,4 +1,4 @@
-From 3bfad77d0bca728d480433d4195c693fcbe50074 Mon Sep 17 00:00:00 2001
+From 61ca476f6dad17bdb03299e0047d5668dfffe520 Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 08:36:19 -0700
 Subject: [PATCH 2/6] Input field: bring back Select all in the long press menu
@@ -13,10 +13,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 5 insertions(+)
 
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-index 244b8604..dfb033f6 100644
+index 2d44fd4e..6cf023c2 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-@@ -28601,6 +28601,7 @@ public class ChatActivity extends BaseFragment implements
+@@ -28596,6 +28596,7 @@ public class ChatActivity extends BaseFragment implements
          menu.add(android.R.id.cut, android.R.id.cut, order++, android.R.string.cut);
          menu.add(android.R.id.copy, android.R.id.copy, order++, android.R.string.copy);
          menu.add(android.R.id.paste, android.R.id.paste, order++, android.R.string.paste);
@@ -39,3 +39,6 @@ index 1e7c5f5c..304579ad 100644
                  if (performMenuAction(item.getItemId())) {
                      mode.finish();
                      return true;
+-- 
+2.56.0.windows.2
+

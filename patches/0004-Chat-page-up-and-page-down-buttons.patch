@@ -1,4 +1,4 @@
-From a85344a5668440eb45c56eff7e86b40bf1992ad4 Mon Sep 17 00:00:00 2001
+From b1c8e6f4cb6494048ffdd51953e781a8322ef445 Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 08:39:00 -0700
 Subject: [PATCH 4/6] Chat: page up and page down buttons
@@ -13,10 +13,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  2 files changed, 36 insertions(+), 4 deletions(-)
 
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-index eee0f422..1384a1d2 100644
+index e12cb3fc..96e43573 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-@@ -7247,6 +7247,7 @@ public class ChatActivity extends BaseFragment implements
+@@ -7242,6 +7242,7 @@ public class ChatActivity extends BaseFragment implements
                  if (chatListThanosEffect != null) {
                      chatListThanosEffect.scroll(dx, dy);
                  }
@@ -24,7 +24,7 @@ index eee0f422..1384a1d2 100644
                  scrollUp = dy < 0;
                  int firstVisibleItem = chatLayoutManager.findFirstVisibleItemPosition();
                  if (dy != 0 && (scrollByTouch && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_SETTLING) || recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING) {
-@@ -49413,8 +49414,31 @@ public class ChatActivity extends BaseFragment implements
+@@ -49344,8 +49345,31 @@ public class ChatActivity extends BaseFragment implements
          }
      }
  
@@ -104,3 +104,6 @@ index a23f816a..04ee4e6b 100644
              }
              final ChatActivityBlurredRoundPageDownButton button = ChatActivityBlurredRoundPageDownButton.create(
                  getContext(),
+-- 
+2.56.0.windows.2
+

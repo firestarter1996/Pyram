@@ -1,4 +1,4 @@
-From 95328c60386740a7d4f5f8e1a298802b9defd75f Mon Sep 17 00:00:00 2001
+From ebbf284b2a77740ac2dbf6617fa3441df5e9e25c Mon Sep 17 00:00:00 2001
 From: firestarter1996 <firestarter1996@users.noreply.github.com>
 Date: Sat, 17 Oct 2026 08:42:27 -0700
 Subject: [PATCH 5/6] Chat: fast scroll thumb with a date bubble
@@ -14,10 +14,10 @@ Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
  create mode 100644 TMessagesProj/src/main/java/org/telegram/ui/Components/ChatFastScroller.java
 
 diff --git a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-index 1384a1d2..988728de 100644
+index 96e43573..03d94fce 100644
 --- a/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
 +++ b/TMessagesProj/src/main/java/org/telegram/ui/ChatActivity.java
-@@ -7248,6 +7248,9 @@ public class ChatActivity extends BaseFragment implements
+@@ -7243,6 +7243,9 @@ public class ChatActivity extends BaseFragment implements
                      chatListThanosEffect.scroll(dx, dy);
                  }
                  updateScreenPageButtons();
@@ -27,7 +27,7 @@ index 1384a1d2..988728de 100644
                  scrollUp = dy < 0;
                  int firstVisibleItem = chatLayoutManager.findFirstVisibleItemPosition();
                  if (dy != 0 && (scrollByTouch && recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_SETTLING) || recyclerView.getScrollState() == RecyclerView.SCROLL_STATE_DRAGGING) {
-@@ -7384,6 +7387,18 @@ public class ChatActivity extends BaseFragment implements
+@@ -7379,6 +7382,18 @@ public class ChatActivity extends BaseFragment implements
          });
  
          contentView.addView(chatListView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
@@ -46,7 +46,7 @@ index 1384a1d2..988728de 100644
  
          chatActivityFadeView = new ChatActivityFadeView(context);
          chatActivityFadeView.setup(navbarContentDrawableFactory);
-@@ -49414,6 +49429,8 @@ public class ChatActivity extends BaseFragment implements
+@@ -49345,6 +49360,8 @@ public class ChatActivity extends BaseFragment implements
          }
      }
  
@@ -304,3 +304,6 @@ index 00000000..2669471a
 +        AndroidUtilities.cancelRunOnUIThread(hideRunnable);
 +    }
 +}
+-- 
+2.56.0.windows.2
+
