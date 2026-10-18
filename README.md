@@ -1,6 +1,6 @@
-# Nagram with a few quality of life fixes
+# Pyram: Nagram with a few quality of life fixes
 
-This branch builds [Nagram](https://github.com/NextAlone/Nagram) with these changes on top of the newest upstream release. The forum topic typing fix that started this fork is now part of upstream Nagram itself (release 1253), so it is no longer carried here.
+Pyram is a fork that builds [Nagram](https://github.com/NextAlone/Nagram) with these changes on top of the newest upstream release. The forum topic typing fix that started this fork is now part of upstream Nagram itself (release 1253), so it is no longer carried here.
 
 ## What is changed
 
